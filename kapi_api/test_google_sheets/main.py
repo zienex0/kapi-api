@@ -14,7 +14,7 @@ SPREADSHEET_ID = "14GrMsrgj_Uz8bZnAcZm68PjWsU1dXvVj5kUuZccZYxs"
 def establish_connection_with_google_sheet(scopes, spreadsheet_id):
   creds = None
   if os.path.exists("token.json"):
-    creds = Credentials.from_authorized_user_file("token.json", SCOPES)
+    creds = Credentials.from_authorized_user_file("token.json", scopes)
 
   if not creds or not creds.valid:
     if creds and creds.expired and creds.refresh_token:
