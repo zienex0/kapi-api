@@ -146,7 +146,6 @@ def register_user():
 
 @app.route('/login_user', methods=['POST'])
 def login_user():
-
     login = request.json['login']
     password = request.json['password']
     
