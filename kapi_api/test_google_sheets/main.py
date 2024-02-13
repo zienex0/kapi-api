@@ -6,16 +6,12 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-# If modifying these scopes, delete the file token.json.
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
 
-# The ID and range of a sample spreadsheet.
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+
 SPREADSHEET_ID = "14GrMsrgj_Uz8bZnAcZm68PjWsU1dXvVj5kUuZccZYxs"
 
-def main():
-  """Shows basic usage of the Sheets API.
-  Prints values from a sample spreadsheet.
-  """
+def establish_connection_with_google_sheet(scopes, spreadsheet_id):
   creds = None
   if os.path.exists("token.json"):
     creds = Credentials.from_authorized_user_file("token.json", SCOPES)
@@ -25,7 +21,7 @@ def main():
       creds.refresh(Request())
     else:
       flow = InstalledAppFlow.from_client_secrets_file(
-          "credentials.json", SCOPES
+          "credentials.json", scopes
       )
       creds = flow.run_local_server(port=0)
 
@@ -38,7 +34,7 @@ def main():
     sheet = service.spreadsheets()
     result = (
         sheet.values()
-        .get(spreadsheetId=SPREADSHEET_ID, range="Arkusz1")
+        .get(spreadsheetId=spreadsheet_id, range="Arkusz1")
         .execute()
     )
     values = result.get("values", [])
@@ -55,4 +51,4 @@ def main():
 
 
 if __name__ == "__main__":
-  main()
+  establish_connection_with_google_sheet(SCOPES, SPREADSHEET_ID)
