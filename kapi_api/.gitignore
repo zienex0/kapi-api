@@ -1,0 +1,5 @@
+services/google/__pycache__/
+services/google/credentials.json
+services/google/token.json
+data/
+instance/
