@@ -39,6 +39,9 @@ def students_data():
 @app.route('/add_student', methods=['POST'])
 def add_student():
     new_student_data = request.json
+    if len(new_student_data) != len(read_spreadsheet_columns()):
+        return jsonify({"error": "The numbers of requested columns are not matching"}), 400
+    
     creds = get_google_token(GOOGLE_SCOPES)
     try:
         result = append_row_to_spreadsheet(creds=creds, 
