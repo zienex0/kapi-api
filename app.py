@@ -40,26 +40,32 @@ def students_data():
 def add_student():
     new_student_data = request.json
     creds = get_google_token(GOOGLE_SCOPES)
-    result = append_row_to_spreadsheet(creds=creds, 
-                                       spreadsheet_id=SPREADSHEET_ID,
-                                       range_name="Arkusz1",
-                                       json_data=new_student_data)
-    if result:
-        return jsonify({"message": "Row added to the spreadsheet successfuly"}), 200
-    else:
-        return jsonify({"message": "Unexpected error occurred"}), 500
-    
+    try:
+        result = append_row_to_spreadsheet(creds=creds, 
+                                        spreadsheet_id=SPREADSHEET_ID,
+                                        range_name="Arkusz1",
+                                        json_data=new_student_data)
+        if result:
+            return jsonify({"message": "Row added to the spreadsheet successfuly"}), 200
+        else:
+            return jsonify({"error": "Unexpected error occurred"}), 500
+    except Exception as e:
+        return jsonify({"error": e})
+        
 
 @app.route("/spreadsheet_col_names", methods=["GET"])
 def column_names():
     creds = get_google_token(GOOGLE_SCOPES)
-    col_names = read_spreadsheet_columns(creds=creds,
-                                         spreadsheet_id=SPREADSHEET_ID,
-                                         range_name="Arkusz1")
-    if col_names:
-        return jsonify(col_names), 200
-    else:
-        return jsonify({"message": "Unexpected error occurred"}), 500
+    try:
+        col_names = read_spreadsheet_columns(creds=creds,
+                                            spreadsheet_id=SPREADSHEET_ID,
+                                            range_name="Arkusz1")
+        if col_names:
+            return jsonify(col_names), 200
+        else:
+            return jsonify({"message": "Unexpected error occurred"}), 500
+    except Exception as e:
+        return jsonify({"error": e})
 
 
 # TODO 2: Create edit_students_data func

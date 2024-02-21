@@ -23,10 +23,6 @@ def read_spreadsheet_data(creds, spreadsheet_id, range_name):
         )
         col_names = read_spreadsheet_columns(creds=creds, spreadsheet_id=spreadsheet_id, range_name=range_name)
         values = result.get("values", [])
-
-        if not values:
-            print("No data found.")
-            return
         
         list_of_json_values = []
         for row in range(1, len(values)):
