@@ -29,8 +29,7 @@ def read_spreadsheet_data(creds, spreadsheet_id, range_name):
             row_values = {col_names[i]:values[row][i] for i in range(len(col_names))}
             list_of_json_values.append(row_values)
         
-        json_values = json.dumps(list_of_json_values)
-        return json_values
+        return list_of_json_values
     
     except HttpError as err:
         print(err)

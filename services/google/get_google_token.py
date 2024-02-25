@@ -6,6 +6,31 @@ import json
 
 
 def get_google_token(scopes):
+    """
+    Retrieves or refreshes Google API credentials, handling both new authorization and existing token refresh scenarios.
+
+    Attempts to construct a `Credentials` object using environment variables. If credentials are invalid or absent,
+    it either refreshes the token using a refresh token or initiates an authorization flow for installed applications.
+    Successful authentication updates the access token in environment variables and returns the credentials object.
+
+    :param scopes: A list of strings specifying the Google API scopes needed for the credentials.
+    :type scopes: list
+
+    :return: A `Credentials` object for accessing Google APIs.
+    :rtype: google.oauth2.credentials.Credentials
+
+    Environment Variables:
+    - GOOGLE_TOKEN: Current access token.
+    - GOOGLE_REFRESH_TOKEN: Refresh token to obtain a new access token.
+    - GOOGLE_TOKEN_URI: Endpoint URI for obtaining tokens.
+    - GOOGLE_CLIENT_ID: Client ID for Google API application.
+    - GOOGLE_CLIENT_SECRET: Client secret for Google API application.
+    - GOOGLE_PROJECT_ID: (Optional) Project ID for the Google API application.
+    - GOOGLE_AUTH_URI: Authorization endpoint URI.
+    - GOOGLE_AUTH_PROVIDER_X509_CERT_URL: URL of the public certificate for token verification.
+    - GOOGLE_REDIRECT_URIS: Comma-separated list of redirect URIs.
+    """
+    
     creds = None
 
     token_info = {

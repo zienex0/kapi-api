@@ -44,12 +44,18 @@ def add_student():
     
     creds = get_google_token(GOOGLE_SCOPES)
     try:
-        result = append_row_to_spreadsheet(creds=creds, 
+        success = append_row_to_spreadsheet(creds=creds, 
                                         spreadsheet_id=SPREADSHEET_ID,
                                         range_name="Arkusz1",
                                         json_data=new_student_data)
-        if result:
-            return jsonify({"message": "Row added to the spreadsheet successfuly"}), 200
+        if success:
+            send_mail(creds=creds, 
+                      to=["wojtop@interia.pl", "szymon.zienkiewicz5@gmail.com"],
+                      from_email="szymon.zienkiewicz5@gmail.com",
+                      subject="Automatyczny mail po dostaniu formularza",
+                      body="Ten mail został wysłany automatycznie, nie odpisuj na niego.\nOtrzymaliśmy nowy wypełniony formularz, zarejestrował się nowy uczestnik")
+            
+            return jsonify({"message": "Row added to the spreadsheet successfuly. Mail automaticaly sent"}), 200
         else:
             return jsonify({"error": "Unexpected error occurred"}), 500
     except Exception as e:
