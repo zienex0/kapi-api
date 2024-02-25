@@ -21,12 +21,18 @@ def read_spreadsheet_data(creds, spreadsheet_id, range_name):
             .get(spreadsheetId=spreadsheet_id, range=range_name)
             .execute()
         )
-        col_names = read_spreadsheet_columns(creds=creds, spreadsheet_id=spreadsheet_id, range_name=range_name)
         values = result.get("values", [])
+        if not values:
+            return {"success": True, "data": []}
         
+        col_names = values[0]
         list_of_json_values = []
-        for row in range(1, len(values)):
-            row_values = {col_names[i]:values[row][i] for i in range(len(col_names))}
+
+        for row_indx in range(1, len(values)):
+            row = values[row_indx]
+
+            row_values = {col_names[i]:row[i] for i in range(len(col_names))}
+
             list_of_json_values.append(row_values)
         
         return {"success": True, "data": list_of_json_values}
@@ -73,26 +79,28 @@ def append_row_to_spreadsheet(creds, spreadsheet_id, range_name, json_data):
     :param json_data: A json that contains column names with attached values in order to append it to a spreadsheet.
     """
     try:
-        col_names = read_spreadsheet_columns(creds=creds, spreadsheet_id=spreadsheet_id, range_name=range_name)
+        response = read_spreadsheet_columns(creds=creds, spreadsheet_id=spreadsheet_id, range_name=range_name)
+        if response["success"]:
+            col_names = response["data"]
+            
+            # Map the values to corresponding columns from the json data
+            row_values = [""] * len(col_names)
+            for key, value in json_data.items():
+                index = col_names.index(key)
+                row_values[index] = value
 
-        # Map the values to corresponding columns from the json data
-        row_values = [""] * len(col_names)
-        for key, value in json_data.items():
-            index = col_names.index(key)
-            row_values[index] = value
+            service = build("sheets", "v4", credentials=creds)
 
-        service = build("sheets", "v4", credentials=creds)
+            body = {"values": [row_values]}
 
-        body = {"values": [row_values]}
+            result = (
+                service.spreadsheets().values()
+                .append(spreadsheetId=spreadsheet_id, range=range_name,
+                        valueInputOption="USER_ENTERED", body=body)
+                .execute()
+            )
 
-        result = (
-            service.spreadsheets().values()
-            .append(spreadsheetId=spreadsheet_id, range=range_name,
-                    valueInputOption="USER_ENTERED", body=body)
-            .execute()
-        )
-
-        return {"success": True, "data": result}
-    
+            return {"success": True, "data": result}
+        
     except HttpError as err:
         return {"success": False, "message": err}
