@@ -24,11 +24,15 @@ def home():
 @app.route('/students_data', methods=['GET'])
 def students_data():
     creds = get_google_token(scopes=GOOGLE_SCOPES)
-    spreadsheet_data = read_spreadsheet_data(creds=creds, 
+    spreadsheet_response = read_spreadsheet_data(creds=creds, 
                                              spreadsheet_id=SPREADSHEET_ID, 
                                              range_name="Arkusz1")
+    if spreadsheet_response["success"]:
+        data = spreadsheet_response["data"]
+        return jsonify(data), 200
     
-    return jsonify(spreadsheet_data), 200
+    elif not spreadsheet_response["success"]:
+        return jsonify(spreadsheet_response), 400
 
 # TODO 1: Create the read_student_groups func to return it to the frontend
 # @app.route('/student_groups', methods=['GET'])
@@ -40,41 +44,39 @@ def students_data():
 def add_student():
     new_student_data = request.json
     if len(new_student_data) != len(read_spreadsheet_columns()):
-        return jsonify({"error": "The numbers of requested columns are not matching"}), 400
+        return jsonify({"success": False, "message": "The numbers of requested columns are not matching"}), 400
     
     creds = get_google_token(GOOGLE_SCOPES)
-    try:
-        success = append_row_to_spreadsheet(creds=creds, 
-                                        spreadsheet_id=SPREADSHEET_ID,
-                                        range_name="Arkusz1",
-                                        json_data=new_student_data)
-        if success:
-            send_mail(creds=creds, 
-                      to=["wojtop@interia.pl", "szymon.zienkiewicz5@gmail.com"],
-                      from_email="szymon.zienkiewicz5@gmail.com",
-                      subject="Automatyczny mail po dostaniu formularza",
-                      body="Ten mail został wysłany automatycznie, nie odpisuj na niego.\nOtrzymaliśmy nowy wypełniony formularz, zarejestrował się nowy uczestnik")
-            
-            return jsonify({"message": "Row added to the spreadsheet successfuly. Mail automaticaly sent"}), 200
-        else:
-            return jsonify({"error": "Unexpected error occurred"}), 500
-    except Exception as e:
-        return jsonify({"error": e})
+
+    response = append_row_to_spreadsheet(creds=creds, 
+                                         spreadsheet_id=SPREADSHEET_ID,
+                                         range_name="Arkusz1",
+                                         json_data=new_student_data)
+    if response["success"]:
+        send_mail(creds=creds, 
+                    to=["wojtop@interia.pl", "szymon.zienkiewicz5@gmail.com"],
+                    from_email="szymon.zienkiewicz5@gmail.com",
+                    subject="Automatyczny mail po dostaniu formularza",
+                    body="Ten mail został wysłany automatycznie, nie odpisuj na niego.\nOtrzymaliśmy nowy wypełniony formularz, zarejestrował się nowy uczestnik")
+        
+        return jsonify({"message": "Row added to the spreadsheet successfuly. Mail automaticaly sent"}), 200
+    
+    elif not response["success"]:
+        return jsonify(response), 400
         
 
 @app.route("/spreadsheet_col_names", methods=["GET"])
 def column_names():
     creds = get_google_token(GOOGLE_SCOPES)
-    try:
-        col_names = read_spreadsheet_columns(creds=creds,
-                                            spreadsheet_id=SPREADSHEET_ID,
-                                            range_name="Arkusz1")
-        if col_names:
-            return jsonify(col_names), 200
-        else:
-            return jsonify({"message": "Unexpected error occurred"}), 500
-    except Exception as e:
-        return jsonify({"error": e})
+
+    column_names_response = read_spreadsheet_columns(creds=creds,
+                                        spreadsheet_id=SPREADSHEET_ID,
+                                        range_name="Arkusz1")
+    if column_names_response["success"]:
+        return jsonify(column_names_response["data"]), 200
+    
+    elif not column_names_response["success"]:
+        return jsonify(column_names_response), 400
 
 
 # TODO 2: Create edit_students_data func

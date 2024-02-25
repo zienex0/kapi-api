@@ -29,10 +29,10 @@ def read_spreadsheet_data(creds, spreadsheet_id, range_name):
             row_values = {col_names[i]:values[row][i] for i in range(len(col_names))}
             list_of_json_values.append(row_values)
         
-        return list_of_json_values
+        return {"success": True, "data": list_of_json_values}
     
     except HttpError as err:
-        print(err)
+        return {"success": False, "message": err}
 
 
 def read_spreadsheet_columns(creds, spreadsheet_id, range_name):
@@ -54,11 +54,11 @@ def read_spreadsheet_columns(creds, spreadsheet_id, range_name):
             .execute()
         )
         col_names = result.get("values", [])[0] if result.get("values") else []
-        return col_names
+        return {"success": True, "data": col_names}
     
     except HttpError as err:
-        print(err)
-        return []
+        return {"success": False, "message":err}
+    
 
 def append_row_to_spreadsheet(creds, spreadsheet_id, range_name, json_data):
     """
@@ -92,8 +92,7 @@ def append_row_to_spreadsheet(creds, spreadsheet_id, range_name, json_data):
             .execute()
         )
 
-        return result
+        return {"success": True, "data": result}
     
     except HttpError as err:
-        print(err)
-        return
+        return {"success": False, "message": err}
