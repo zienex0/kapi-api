@@ -27,8 +27,9 @@ def students_data():
     spreadsheet_data_as_json = read_spreadsheet_data(creds=creds, 
                                                      spreadsheet_id=SPREADSHEET_ID, 
                                                      range_name="Arkusz1")
+    spreadsheet_data = json.loads(spreadsheet_data_as_json)
     
-    return jsonify(spreadsheet_data_as_json), 200
+    return jsonify(spreadsheet_data), 200
 
 # TODO 1: Create the read_student_groups func to return it to the frontend
 # @app.route('/student_groups', methods=['GET'])
