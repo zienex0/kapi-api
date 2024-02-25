@@ -24,10 +24,9 @@ def home():
 @app.route('/students_data', methods=['GET'])
 def students_data():
     creds = get_google_token(scopes=GOOGLE_SCOPES)
-    spreadsheet_data_as_json = read_spreadsheet_data(creds=creds, 
-                                                     spreadsheet_id=SPREADSHEET_ID, 
-                                                     range_name="Arkusz1")
-    spreadsheet_data = json.loads(spreadsheet_data_as_json)
+    spreadsheet_data = read_spreadsheet_data(creds=creds, 
+                                             spreadsheet_id=SPREADSHEET_ID, 
+                                             range_name="Arkusz1")
     
     return jsonify(spreadsheet_data), 200
 
