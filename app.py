@@ -63,7 +63,31 @@ def add_student():
     
     elif not response["success"]:
         return jsonify(response), 400
-        
+
+
+def col_types_names():
+    """
+    Temporary function. Right now it is hardcoded.
+    In the future, the customer will decide column types to make training forms correct 
+    thus making editing correct.
+    """
+    
+    types_names = {"Imię": "String",
+                   "Nazwisko": "String",
+                   "Telefon": "Phone",
+                   "Mail": "Mail",
+                   "Rocznik": "selectYear",
+                   "Adres": "String",
+                   "Kod pocztowy": "postal",
+                   "Grupa": "selectGroup",
+                   "Rozmiar koszulki": "selectSize",
+                   "Uwagi": "String",
+                   "Zgoda na regulamin": "bool",
+                   "Jednorazowy trening": "bool",
+                   }
+    
+    return types_names
+
 
 @app.route("/spreadsheet_col_names", methods=["GET"])
 def column_names():
@@ -73,7 +97,9 @@ def column_names():
                                         spreadsheet_id=SPREADSHEET_ID,
                                         range_name="Arkusz1")
     if column_names_response["success"]:
-        return jsonify(column_names_response["data"]), 200
+        # col_names = column_names_response["data"]
+        data_about_cols = col_types_names()
+        return jsonify(data_about_cols), 200
     
     elif not column_names_response["success"]:
         return jsonify(column_names_response), 400
