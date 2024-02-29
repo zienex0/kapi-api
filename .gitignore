@@ -3,3 +3,4 @@ services/google/credentials.json
 services/google/token.json
 .DS_Store
 services/google/refresh_creds.py
+.env

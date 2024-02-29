@@ -8,7 +8,7 @@ from googleapiclient.errors import HttpError
 import json
 
 
-def send_mail(creds, to, from_email, subject, body, attachment_path):
+def send_mail(creds, to, from_email, subject, body, attachment_path=None):
     try:
         service = build("gmail", "v1", credentials=creds)
         mime_message = EmailMessage()
@@ -19,13 +19,14 @@ def send_mail(creds, to, from_email, subject, body, attachment_path):
         
         mime_message.set_content(body)
         
-        if attachment_path and os.path.isfile(attachment_path):
-            type_subtype, _ = mimetypes.guess_type(attachment_path)
-            maintype, subtype = type_subtype.split("/")
-            
-            with open(attachment_path, "rb") as fp:
-                attachment_data = fp.read()
-            mime_message.add_attachment(attachment_data, maintype, subtype)
+        if attachment_path:
+            if os.path.isfile(attachment_path):
+                type_subtype, _ = mimetypes.guess_type(attachment_path)
+                maintype, subtype = type_subtype.split("/")
+                
+                with open(attachment_path, "rb") as fp:
+                    attachment_data = fp.read()
+                mime_message.add_attachment(attachment_data, maintype, subtype)
         
         encoded_message = base64.urlsafe_b64encode(mime_message.as_bytes()).decode()
         create_message = {"raw": encoded_message}

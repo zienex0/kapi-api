@@ -1,8 +1,6 @@
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-import json
-
 
 def read_spreadsheet_data(creds, spreadsheet_id, range_name):
     """
