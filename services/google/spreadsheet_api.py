@@ -2,7 +2,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 
-def read_spreadsheet_data(creds, spreadsheet_id, range_name):
+def ordered_students_data(creds, spreadsheet_id, range_name):
     """
     Initializes the Google Sheets service using credentials. Reads the Google Sheet data as returns it as json.
 
@@ -38,6 +38,26 @@ def read_spreadsheet_data(creds, spreadsheet_id, range_name):
     except HttpError as err:
         return {"success": False, "message": err}
 
+
+def read_spreadsheet_data(creds, spreadsheet_id, range_name):
+    try:
+        service = build("sheets", "v4", credentials=creds)
+        sheet = service.spreadsheets()
+        result = (
+            sheet.values()
+            .get(spreadsheetId=spreadsheet_id, range=range_name)
+            .execute()
+        )
+        values = result.get("values", [])
+        if not values:
+            return {"success": True, "data": []}
+        else:
+            return {"success": True, "data": values}
+        
+    except HttpError as err:
+        return {"success": False, "message": err}
+
+    
 
 def read_spreadsheet_columns(creds, spreadsheet_id, range_name):
     """
@@ -102,3 +122,4 @@ def append_row_to_spreadsheet(creds, spreadsheet_id, range_name, json_data):
         
     except HttpError as err:
         return {"success": False, "message": err}
+

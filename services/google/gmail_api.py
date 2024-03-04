@@ -5,8 +5,6 @@ from email.message import EmailMessage
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-import json
-
 
 def send_mail(creds, to, from_email, subject, body, attachment_path=None):
     try:
@@ -32,9 +30,7 @@ def send_mail(creds, to, from_email, subject, body, attachment_path=None):
         create_message = {"raw": encoded_message}
         
         send_message = service.users().messages().send(userId="me", body=create_message).execute()
-        print(f'Message Id: {send_message["id"]}')
     except HttpError as error:
-        print(f"An error occurred: {error}")
         send_message = None
         
     return send_message
