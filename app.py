@@ -1,18 +1,20 @@
 import json
 import os
+import logging
 
 from flask import Flask, request
 from flask_cors import CORS
 
-from services.google.gmail_api import send_mail
-from services.google.spreadsheet_api import ordered_students_data, read_spreadsheet_columns, append_row_to_spreadsheet, read_spreadsheet_data
-from services.google.get_google_token import get_google_token
+from services.google.gmail_api import send_email
+from services.google.spreadsheet_api import read_spreadsheet_data, append_row_to_spreadsheet
+from services.google.get_google_token import get_access_token
 
 from flask import Response
 
 from dotenv import load_dotenv
 load_dotenv()
 
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 app = Flask(__name__)
 CORS(app)
@@ -21,12 +23,24 @@ GOOGLE_SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.go
 SPREADSHEET_ID = os.getenv('SPREADSHEET_ID')
 
 
+def refresh_spreadsheet_data():
+    global spreadsheet_data
+    token = get_access_token()
+    spreadsheet_response = read_spreadsheet_data(access_token=token, spreadsheet_id=SPREADSHEET_ID, range_name="Arkusz1")
+    status = spreadsheet_response
+    if status['success']:
+        spreadsheet_data = status['data']
+    else:
+        spreadsheet_data = []
+    return status
+
+
 def pretty_json(data, status_code):
-    response = Response(response=json.dumps(data, indent=4, separators=(',', ': ')),
-                        status=status_code,
-                        mimetype="application/json")
+    response = Response(response=json.dumps(data, indent=4, separators=(',', ': ')), status=status_code, mimetype="application/json")
     return response
 
+
+spreadsheet_data = []
 
 @app.route('/')
 def home():
@@ -36,120 +50,130 @@ def home():
 
 @app.route('/students_data', methods=['GET'])
 def students_data():
-    creds = get_google_token(scopes=GOOGLE_SCOPES)
-    spreadsheet_response = ordered_students_data(creds=creds, 
-                                             spreadsheet_id=SPREADSHEET_ID, 
-                                             range_name="Arkusz1")
-    if spreadsheet_response["success"]:
-        data = spreadsheet_response["data"]
-        return pretty_json(data, 200)
-    
-    elif not spreadsheet_response["success"]:
-        return pretty_json(spreadsheet_response, 400)
+    if not spreadsheet_data:
+        status = refresh_spreadsheet_data()
+        if status["success"]:
+            pass
+        else:
+            return pretty_json(status, 400)
+
+    col_names = spreadsheet_data[0]
+    list_of_json_values = []
+
+    for row_indx in range(1, len(spreadsheet_data)):
+        row = spreadsheet_data[row_indx]
+        row_values = {col_names[i]:row[i] for i in range(len(col_names))}
+        list_of_json_values.append(row_values)
+
+    msg = {"success": True, "data": list_of_json_values}
+    return pretty_json(msg["data"], 200)
 
 
 @app.route('/student_groups', methods=['GET'])
 def student_groups():
-    creds = get_google_token(scopes=GOOGLE_SCOPES)
-    spreadsheet_response = read_spreadsheet_data(creds=creds,
-                                                 spreadsheet_id=SPREADSHEET_ID,
-                                                 range_name="Arkusz1")    
-    if spreadsheet_response["success"]:
-        values = spreadsheet_response["data"]
-        groups_col_name = "Grupa"
-        col_name_index = values[0].index(groups_col_name)
-        unique_groups = set()
-        
-        for row in values[1:]:
-            group_name = row[col_name_index]
+    if not spreadsheet_data:
+        status = refresh_spreadsheet_data()
+        if status["success"]:
+            pass
+        else:
+            return pretty_json(status, 400)
 
-            if group_name.isdigit():
-                unique_groups.add(int(group_name))
-            else:
-                unique_groups.add(group_name)
+    groups_col_name = "Grupa"
+    col_name_index = spreadsheet_data[0].index(groups_col_name)
+    unique_groups = set()
 
-        unique_groups_list = list(unique_groups)
-        unique_groups_list.sort()
-        return pretty_json(unique_groups_list, 200)
-    
-    elif not spreadsheet_response["success"]:
-        return pretty_json(spreadsheet_response, 400)
+    for row in spreadsheet_data[1:]:
+        group_name = row[col_name_index]
+        if group_name.isdigit():
+            unique_groups.add(int(group_name))
+        else:
+            unique_groups.add(group_name)
+
+    unique_groups_list = list(unique_groups)
+    unique_groups_list.sort()
+    return pretty_json(unique_groups_list, 200)
 
 
 @app.route('/students_by_group', methods=['GET'])
 def students_by_group():
-    desired_group = str(request.args.get('group', default=None, type=int))
+    if not spreadsheet_data:
+        status = refresh_spreadsheet_data()
+        if status["success"]:
+            pass
+        else:
+            return pretty_json(status, 400)
+
+    desired_group = request.args.get('group', default=None, type=int)
     if not desired_group:
         message = {"success": False, "message": "Group name is required as a query parameter"}
         return pretty_json(message, 400)
-    
-    creds = get_google_token(scopes=GOOGLE_SCOPES)
-    spreadsheet_response = ordered_students_data(creds=creds,
-                                                 spreadsheet_id=SPREADSHEET_ID,
-                                                 range_name="Arkusz1")
-    if spreadsheet_response["success"]:
-        groups_col_name = "Grupa"
-        student_rows = spreadsheet_response["data"]
 
-        filtered_students = []
-        for row in student_rows:
-            if row[groups_col_name] == desired_group:
-                filtered_students.append(row)
-        
-        return pretty_json(filtered_students, 200)
+    desired_group = str(desired_group)
 
-    else:
-        return pretty_json(spreadsheet_response, 400)
+    groups_col_name = "Grupa"
+    col_name_index = spreadsheet_data[0].index(groups_col_name)
+
+    filtered_students = []
+    for row in spreadsheet_data[1:]:
+        if row[col_name_index] == desired_group:
+            filtered_students.append(row)
+
+    return pretty_json(filtered_students, 200)
 
 
-@app.route('/add_student', methods=['POST'])
+@app.route('/add_student', methods=['GET'])
 def add_student():
     new_student_data = request.json
-    
-    creds = get_google_token(GOOGLE_SCOPES)
-    columns_response = read_spreadsheet_columns(creds=creds, spreadsheet_id=SPREADSHEET_ID, range_name="Arkusz1")
-    if columns_response["success"]:
-        spreadsheet_columns = columns_response["data"]
-        # Convert both to sets for comparison
-        json_keys = set(new_student_data.keys())
-        spreadsheet_keys = set(spreadsheet_columns)
+    if not spreadsheet_data:
+        status = refresh_spreadsheet_data()
+        if status["success"]:
+            pass
+        else:
+            return pretty_json(status, 400)
 
-        if json_keys != spreadsheet_keys:
-            missing_keys = spreadsheet_keys - json_keys
-            extra_keys = json_keys - spreadsheet_keys
-            message = {"success": False, "message": "Column mismatch", "missing_keys": list(missing_keys), "extra_keys": list(extra_keys)}
-            return pretty_json(message, 400)
 
-        response = append_row_to_spreadsheet(creds=creds, 
+    spreadsheet_columns = spreadsheet_data[0]
+
+    json_keys = set(new_student_data.keys())
+    spreadsheet_keys = set(spreadsheet_columns)
+
+    if json_keys != spreadsheet_keys:
+        missing_keys = spreadsheet_keys - json_keys
+        extra_keys = json_keys - spreadsheet_keys
+        message = {"success": False, "message": "Column mismatch", "missing_keys": list(missing_keys), "extra_keys": list(extra_keys)}
+        return pretty_json(message, 400)
+
+    token = get_access_token()
+    response = append_row_to_spreadsheet(access_token=token,
+                                            col_names=spreadsheet_columns,
                                             spreadsheet_id=SPREADSHEET_ID,
                                             range_name="Arkusz1",
                                             json_data=new_student_data)
-        if response["success"]:
-            mail_body = new_student_data
+    if response["success"]:
+        mail_body = new_student_data
+        email_components = {
+            'sender': "szymon.zienkiewicz5@gmail.com",
+            'recipient': ["wojtop@interia.pl", "szymon.zienkiewicz5@gmail.com"],
+            'subject': "Automatyczny mail po dostaniu formularza",
+            'body': f"Ten mail został wysłany automatycznie, nie odpisuj na niego.\nOtrzymaliśmy nowy wypełniony formularz, zarejestrował się nowy uczestnik\n{mail_body}"
+        }
 
-            send_mail(creds=creds, 
-                        to=["wojtop@interia.pl", "szymon.zienkiewicz5@gmail.com"],
-                        from_email="szymon.zienkiewicz5@gmail.com",
-                        subject="Automatyczny mail po dostaniu formularza",
-                        body=f"Ten mail został wysłany automatycznie, nie odpisuj na niego.\nOtrzymaliśmy nowy wypełniony formularz, zarejestrował się nowy uczestnik\n{mail_body}")
-            message = {"message": "Row added to the spreadsheet successfuly. Mail automaticaly sent"}
-            return pretty_json(message, 200)
-        
-        elif not response["success"]:
-            return pretty_json(response, 400)
-    
-    else:
-        message = {"success": False, "message": "Error while reading spreadsheet columns."}
-        return pretty_json(message, 400)
+        response = send_email(access_token=token, email_components=email_components)
+        print(response)
+        message = {"success": True, "message": "Row added to the spreadsheet successfuly. Mail automaticaly sent"}
+        return pretty_json(message, 200)
+
+    elif not response["success"]:
+        return pretty_json(response, 400)
 
 
 def col_types_names():
     """
     Temporary function. Right now it is hardcoded.
-    In the future, the customer will decide column types to make training forms correct 
+    In the future, the customer will decide column types to make training forms correct
     thus making editing correct.
     """
-    
+
     types_names = {
     "Imię": "Name",
     "Nazwisko": "Surname",
@@ -164,24 +188,22 @@ def col_types_names():
     "Zgoda na regulamin": "Agree",
     "Jednorazowy trening": "OneTimer",
     }
-    
+
     return types_names
 
 
 @app.route("/spreadsheet_col_names", methods=["GET"])
 def column_names():
-    creds = get_google_token(GOOGLE_SCOPES)
+    if not spreadsheet_data:
+        status = refresh_spreadsheet_data()
+        if status["success"]:
+            pass
+        else:
+            return pretty_json(status, 400)
 
-    column_names_response = read_spreadsheet_columns(creds=creds,
-                                        spreadsheet_id=SPREADSHEET_ID,
-                                        range_name="Arkusz1")
-    if column_names_response["success"]:
-        # col_names = column_names_response["data"]
-        data_about_cols = col_types_names()
-        return pretty_json(data_about_cols, 200)
-    
-    elif not column_names_response["success"]:
-        return pretty_json(column_names_response, 400)
+    col_names = spreadsheet_data[0]
+    data_about_cols = col_types_names()
+    return pretty_json(data_about_cols, 200)
 
 
 # TODO 2: Create edit_students_data func
@@ -193,3 +215,6 @@ def column_names():
 
 if __name__ == '__main__':
     app.run()
+
+
+

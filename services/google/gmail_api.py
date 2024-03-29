@@ -1,37 +1,43 @@
 import base64
-import mimetypes
-import os
-from email.message import EmailMessage
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
+import json
+import requests
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 
-def send_mail(creds, to, from_email, subject, body, attachment_path=None):
-    try:
-        service = build("gmail", "v1", credentials=creds)
-        mime_message = EmailMessage()
-        
-        mime_message["To"] = to
-        mime_message["From"] = from_email
-        mime_message["Subject"] = subject
-        
-        mime_message.set_content(body)
-        
-        if attachment_path:
-            if os.path.isfile(attachment_path):
-                type_subtype, _ = mimetypes.guess_type(attachment_path)
-                maintype, subtype = type_subtype.split("/")
-                
-                with open(attachment_path, "rb") as fp:
-                    attachment_data = fp.read()
-                mime_message.add_attachment(attachment_data, maintype, subtype)
-        
-        encoded_message = base64.urlsafe_b64encode(mime_message.as_bytes()).decode()
-        create_message = {"raw": encoded_message}
-        
-        send_message = service.users().messages().send(userId="me", body=create_message).execute()
-    except HttpError as error:
-        send_message = None
-        
-    return send_message
+def construct_mime_message(email_components):
+    """
+    Constructs a MIME message from email components.
+    """
+    message = MIMEMultipart()
+    message["to"] = ", ".join(email_components["recipient"])
+    message["from"] = email_components["sender"]
+    message["subject"] = email_components["subject"]
 
+    msg = MIMEText(email_components["body"], "plain")
+    message.attach(msg)
+
+    return message.as_string()
+
+def send_email(access_token, email_components):
+    """
+    Sends an email using the Gmail API.
+    Requires email components with 'sender', 'recipient', 'subject' and 'body'
+    """
+
+    url = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+
+    raw_mime_message = construct_mime_message(email_components)
+    encoded_message = base64.urlsafe_b64encode(raw_mime_message.encode("utf-8")).decode("utf-8")
+
+    body = {"raw": encoded_message}
+    response = requests.post(url, headers=headers, data=json.dumps(body))
+
+    if response.status_code == 200:
+        return response.json()
+    else:
+        print(f"Failed to send email: {response.text}")
