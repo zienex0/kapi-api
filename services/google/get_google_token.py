@@ -44,6 +44,10 @@ def update_env_file(env_path, key, value):
         file.writelines(lines)
 
 def get_access_token():
+    """
+    Uses refresh token that is connected with one's Google account
+    and app credentials in order to create an access token
+    """
     with open(CREDENTIALS_PATH, 'r') as f:
         credentials = json.load(f)['installed']
 

@@ -19,14 +19,15 @@ logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %
 app = Flask(__name__)
 CORS(app)
 
-GOOGLE_SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/gmail.send"]
 SPREADSHEET_ID = os.getenv('SPREADSHEET_ID')
+STUDENTS_DATA_RANGE_NAME = 'Arkusz1'
 
 
 def refresh_spreadsheet_data():
     global spreadsheet_data
     token = get_access_token()
-    spreadsheet_response = read_spreadsheet_data(access_token=token, spreadsheet_id=SPREADSHEET_ID, range_name="Arkusz1")
+    spreadsheet_response = read_spreadsheet_data(access_token=token, spreadsheet_id=SPREADSHEET_ID, range_name=STUDENTS_DATA_RANGE_NAME)
+
     status = spreadsheet_response
     if status['success']:
         spreadsheet_data = status['data']
@@ -46,6 +47,22 @@ spreadsheet_data = []
 def home():
     test_message = {'testing': 'it works', 'another test': 'it works'}
     return pretty_json(test_message, 200)
+
+
+@app.route('/refresh_spreadsheet')
+def on_demand_refresh():
+    refresh_spreadsheet_data()
+
+    col_names = spreadsheet_data[0]
+    list_of_json_values = []
+
+    for row_indx in range(1, len(spreadsheet_data)):
+        row = spreadsheet_data[row_indx]
+        row_values = {col_names[i]:row[i] for i in range(len(col_names))}
+        list_of_json_values.append(row_values)
+
+    msg = {"success": True, "data": list_of_json_values}
+    return pretty_json(msg["data"], 200)
 
 
 @app.route('/students_data', methods=['GET'])
@@ -121,7 +138,7 @@ def students_by_group():
     return pretty_json(filtered_students, 200)
 
 
-@app.route('/add_student', methods=['GET'])
+@app.route('/add_student', methods=['POST'])
 def add_student():
     new_student_data = request.json
     if not spreadsheet_data:
@@ -147,21 +164,21 @@ def add_student():
     response = append_row_to_spreadsheet(access_token=token,
                                             col_names=spreadsheet_columns,
                                             spreadsheet_id=SPREADSHEET_ID,
-                                            range_name="Arkusz1",
+                                            range_name=STUDENTS_DATA_RANGE_NAME,
                                             json_data=new_student_data)
     if response["success"]:
         mail_body = new_student_data
-        email_components = {
-            'sender': "szymon.zienkiewicz5@gmail.com",
-            'recipient': ["wojtop@interia.pl", "szymon.zienkiewicz5@gmail.com"],
-            'subject': "Automatyczny mail po dostaniu formularza",
-            'body': f"Ten mail został wysłany automatycznie, nie odpisuj na niego.\nOtrzymaliśmy nowy wypełniony formularz, zarejestrował się nowy uczestnik\n{mail_body}"
-        }
-
-        response = send_email(access_token=token, email_components=email_components)
-        print(response)
-        message = {"success": True, "message": "Row added to the spreadsheet successfuly. Mail automaticaly sent"}
-        return pretty_json(message, 200)
+        token = get_access_token()
+        response = send_email(access_token=token, 
+                              sender='szymon.zienkiewicz5@gmail.com', 
+                              to=["wojtop@interia.pl", "szymon.zienkiewicz5@gmail.com"],
+                              subject='Automatyczny mail po dostaniu formularza',
+                              message_text=f'Ten mail został wysłany automatycznie, nie odpisuj na niego.\nOtrzymaliśmy nowy wypełniony formularz, zarejestrował się nowy uczestnik\n{mail_body}')
+        if response['success']:
+            message = {"success": True, "message": "Row added to the spreadsheet successfuly. Mail automaticaly sent"}
+            return pretty_json(message, 200)
+        else:
+            return pretty_json(response, 400)
 
     elif not response["success"]:
         return pretty_json(response, 400)
