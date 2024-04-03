@@ -45,8 +45,15 @@ spreadsheet_data = []
 
 @app.route('/')
 def home():
-    test_message = {'testing': 'it works', 'another test': 'it works'}
-    return pretty_json(test_message, 200)
+    available_endpoints = {
+        '/refresh_spreadsheet': 'Refreshes stored data about students', 
+        '/students_data': 'View values about students in a connected Google Spreadsheet',
+        '/student_groups': 'Returns all available unique groups that students are already registered in',
+        '/students_by_group': 'Values about students but sorted by group they belong in',
+        '/add_student': 'Appends values to a student spreadsheet and sends an email about a new user',
+        '/spreadsheet_col_names': 'Returns the first row spreadsheet values, aka column names'
+                           }
+    return pretty_json(available_endpoints, 200)
 
 
 @app.route('/refresh_spreadsheet')
