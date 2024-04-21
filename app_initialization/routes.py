@@ -1,11 +1,11 @@
 import os
 from dotenv import load_dotenv
 from flask import request
+import pytz
+from datetime import datetime   
+from functools import wraps
 
-from flask import Flask, redirect
-from google_auth_oauthlib.flow import Flow
-
-from . import app
+from . import app, cache
 from app_initialization.sheets.sheet_integration import (
     read_spreadsheet_data, 
     unique_col_values,
@@ -14,7 +14,12 @@ from app_initialization.sheets.sheet_integration import (
     get_google_auth_url,
     flow,
     send_email,
-    update_env_file
+    update_env_file,
+    fetch_spreadsheet_data,
+    append_col_to_spreadsheet,
+    add_attendance_bool_rows,
+    validate_attendance_date_for_today,
+    parse_and_validate_attendance,
 )
 
 from utils import (
@@ -28,6 +33,20 @@ ARKUSZ_LISTA_OBECNOŚCI = 'Lista obecności'
 KOLUMNA_GRUP = 'Grupa'
 
 
+def fetch_valid_token(access_func):
+    @wraps(access_func)
+    def wrapper(*args, **kwargs):
+        token = get_valid_access_token(cache.get('access_token'))
+        if not token:
+            return pretty_json_response({'success': False, 'message': 'Failed to obtain valid access token. Try logging in with your Google account once again'}, 401)
+        try:
+            return access_func(token, *args, **kwargs)
+        except Exception as e:
+            return pretty_json_response({'success': False, 'message': str(e)}, 500)
+    wrapper.__name__ = f"{access_func.__name__}_endpoint"
+    return wrapper
+
+
 @app.route('/', methods=['GET'])
 def home_endpoints():
     routes = []
@@ -35,6 +54,7 @@ def home_endpoints():
         if 'GET' in rule.methods and not rule.endpoint == 'static':
             routes.append(f"{rule.rule}")
     return pretty_json_response(routes)
+
 
 @app.route('/get-auth-url', methods=['GET'])
 def get_auth_url():
@@ -52,36 +72,38 @@ def handle_auth_callback():
     else:
         return pretty_json_response({'success': False, 'message': 'Login not successful. Your refresh token was not recieved'})
 
-# TODO: filter the func
+
 @app.route('/all-students', methods=['GET'])
-def students_data():
-    token = get_valid_access_token()
-    students_info = read_spreadsheet_data(access_token=token, spreadsheet_id=SPREADSHEET_ID, range_name=ARKUSZ_UCZNIOWIE)
+@fetch_valid_token
+def students_data(token):
+    students_info = read_spreadsheet_data(access_token=token, spreadsheet_id=SPREADSHEET_ID, sheet_name=ARKUSZ_UCZNIOWIE)
     if students_info['success']:
         return pretty_json_response(students_info['data'])
     else:
         return pretty_json_response(students_info, 400)
 
+
 # TODO: Make choose the groups col name 
 @app.route('/available-groups', methods=['GET'])
-def student_groups():
-    token = get_valid_access_token()
-    student_group_col_name = KOLUMNA_GRUP
-    col_values = unique_col_values(access_token=token, spreadsheet_id=SPREADSHEET_ID, range_name=ARKUSZ_UCZNIOWIE, column=student_group_col_name)
+@fetch_valid_token
+def student_groups(token):
+    col_values = unique_col_values(access_token=token, spreadsheet_id=SPREADSHEET_ID, sheet_name=ARKUSZ_UCZNIOWIE, column=KOLUMNA_GRUP)
     if col_values['success']:
         return pretty_json_response(col_values['data'])
     else:
         return pretty_json_response(col_values, 400)
 
+
 @app.route('/filter-by-group', methods=['GET'])
-def students_by_groups():
-    desired_group = request.args.get('group', default=None, type=int)
+@fetch_valid_token
+def students_by_groups(token):
+    desired_group = request.args.get('group', default=None)
     if not desired_group:
         message = {"success": False, "message": "Group name is required as a query parameter"}
         return pretty_json_response(message, 400)
+
     desired_group = str(desired_group)
 
-    token = get_valid_access_token()
     response = read_spreadsheet_data(token, SPREADSHEET_ID, ARKUSZ_UCZNIOWIE)
     if response['success']:
         spreadsheet_data = response['data']
@@ -96,7 +118,66 @@ def students_by_groups():
         return pretty_json_response(response, 400)
 
 
-@app.route('/columns')
+@app.route('/attendance', methods=['GET'])
+@fetch_valid_token
+def get_attendance(token):
+    date = request.args.get('date', default=None)
+    if not date:
+        return pretty_json_response({'success': False, 'message': "Missing 'date' parameter"}, 400)
+
+    response = parse_and_validate_attendance(access_token=token,
+                                             spreadsheet_id=SPREADSHEET_ID,
+                                             sheet_name=ARKUSZ_LISTA_OBECNOŚCI,
+                                             date_from_client=date)
+    if not response['success']:
+        return pretty_json_response(response, 400)
+    
+    return pretty_json_response(response)
+
+
+@app.route('/attendance', methods=['POST'])
+@fetch_valid_token
+def add_or_update_attendance(token):
+    """
+    Adds attendance for today while no date is given. 
+    Otherwise updates the attendance data on specified day in dd-mm-yyyy format.
+    """
+    attendance_data = request.get_json()
+    if not attendance_data:
+        return pretty_json_response({'success': False, 'message': 'No data provided'}, 400)
+
+    date_from_client = request.args.get('date', default=None)
+    if not date_from_client:
+        return pretty_json_response({'success': False, 'message': "Missing 'date' parameter"}, 400)
+
+    values, err_message = fetch_spreadsheet_data(access_token=token, spreadsheet_id=SPREADSHEET_ID, sheet_name=ARKUSZ_LISTA_OBECNOŚCI)
+    if err_message:
+        return err_message
+    elif not values:
+        return pretty_json_response({'success': False, 'message': 'Spreadsheet is empty'})
+    
+    date_valid_response = validate_attendance_date_for_today(date_from_client=date_from_client)
+    if not date_valid_response['success']:
+        return pretty_json_response(date_valid_response, 400)
+
+    if date_from_client in values[0]:
+        pass
+    else:
+        append_col_to_spreadsheet(token, SPREADSHEET_ID, ARKUSZ_LISTA_OBECNOŚCI, date_from_client)
+
+    response = add_attendance_bool_rows(access_token=token,
+                                        spreadsheet_id=SPREADSHEET_ID,
+                                        sheet_name=ARKUSZ_LISTA_OBECNOŚCI,
+                                        date_from_client=date_from_client,
+                                        json_data=attendance_data)
+    # ZMienic tutaj
+    if not response['success']:
+        return pretty_json_response(response, 400)
+
+    return pretty_json_response(response)
+
+
+@app.route('/columns', methods=['GET'])
 def col_types_names():
     """
     Temporary function. Right now it is hardcoded.
@@ -123,20 +204,20 @@ def col_types_names():
 
 
 @app.route('/add-student', methods=['POST'])
-def add_student():
-    new_student_data = request.json
+@fetch_valid_token
+def add_student(token):
+    new_student_data = request.get_json()
 
     if not new_student_data:
-        return pretty_json_response({'success': False, 'message': 'No data was sent'})
+        return pretty_json_response({'success': False, 'message': 'No data was sent'}, 400)
 
-    token = get_valid_access_token()
     retrieve_students = read_spreadsheet_data(token, SPREADSHEET_ID, ARKUSZ_UCZNIOWIE)
     if retrieve_students['success']:
         col_names = retrieve_students['data'][0]
         append_data_response = append_row_to_spreadsheet(access_token=token,
                                                          col_names=col_names,
                                                          spreadsheet_id=SPREADSHEET_ID,
-                                                         range_name=ARKUSZ_UCZNIOWIE,
+                                                         sheet_name=ARKUSZ_UCZNIOWIE,
                                                          json_data=new_student_data)
         if append_data_response['success']:
             mail_body = new_student_data
@@ -154,3 +235,5 @@ def add_student():
     else:
         # reading the students data not successful
         return pretty_json_response(retrieve_students, 400)
+
+
