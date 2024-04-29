@@ -1,20 +1,12 @@
 import os
-from dotenv import load_dotenv
 from flask import request
-import pytz
-from datetime import datetime   
 from functools import wraps
 
 from . import app, cache
-from app_initialization.sheets.sheet_integration import (
+from google_integration.sheets import (
     read_spreadsheet_data, 
     unique_col_values,
     append_row_to_spreadsheet,
-    get_valid_access_token,
-    get_google_auth_url,
-    flow,
-    send_email,
-    update_env_file,
     fetch_spreadsheet_data,
     append_col_to_spreadsheet,
     add_attendance_bool_rows,
@@ -22,11 +14,29 @@ from app_initialization.sheets.sheet_integration import (
     parse_and_validate_attendance,
 )
 
-from utils import (
-    pretty_json_response,
+from google_integration.auth import (
+    get_valid_access_token,
+    get_google_auth_url,
+    create_google_flow,
 )
 
-load_dotenv()
+from google_integration.email import (
+    send_email,
+)
+
+from utils.general_utils import (
+    pretty_json_response,
+    fields_not_empty,
+    make_cache_key
+)
+
+from utils.environment import (
+    load_environment,
+    update_env_file
+)
+
+load_environment()
+
 SPREADSHEET_ID = os.getenv('SPREADSHEET_ID')
 ARKUSZ_UCZNIOWIE = 'Arkusz1'
 ARKUSZ_LISTA_OBECNOŚCI = 'Lista obecności'
@@ -64,17 +74,30 @@ def get_auth_url():
 
 @app.route('/auth-callback')
 def handle_auth_callback():
+    """
+    Get the response from Google auth callback.
+    Save the refresh token so can generate new valid access tokens
+    for Google API
+    """
+    flow = create_google_flow()
+    if flow is None:
+        return pretty_json_response({'success': False, 'message': 'Failed to create Google auth flow'})
+
     flow.fetch_token(authorization_response=request.url)
     credentials = flow.credentials
     if credentials.refresh_token:
-        update_env_file(key='REFRESH_TOKEN', value=f'"{credentials.refresh_token}"')
-        return pretty_json_response({'success': True, 'message': 'Logged in successful'})
+        resp = update_env_file(key='REFRESH_TOKEN', value=f'"{credentials.refresh_token}"')
+        if resp['success']:
+            return pretty_json_response({'success': True, 'message': 'Logged in successful'})
+        else:
+            return pretty_json_response({'success': False, 'message': 'Failed to save Google account refresh token for app'}, 500)
     else:
         return pretty_json_response({'success': False, 'message': 'Login not successful. Your refresh token was not recieved'})
 
 
 @app.route('/all-students', methods=['GET'])
 @fetch_valid_token
+@cache.cached(timeout=50, key_prefix=make_cache_key)
 def students_data(token):
     students_info = read_spreadsheet_data(access_token=token, spreadsheet_id=SPREADSHEET_ID, sheet_name=ARKUSZ_UCZNIOWIE)
     if students_info['success']:
@@ -86,6 +109,7 @@ def students_data(token):
 # TODO: Make choose the groups col name 
 @app.route('/available-groups', methods=['GET'])
 @fetch_valid_token
+@cache.cached(timeout=50, key_prefix=make_cache_key)
 def student_groups(token):
     col_values = unique_col_values(access_token=token, spreadsheet_id=SPREADSHEET_ID, sheet_name=ARKUSZ_UCZNIOWIE, column=KOLUMNA_GRUP)
     if col_values['success']:
@@ -96,6 +120,7 @@ def student_groups(token):
 
 @app.route('/filter-by-group', methods=['GET'])
 @fetch_valid_token
+@cache.cached(timeout=50, key_prefix=make_cache_key)
 def students_by_groups(token):
     desired_group = request.args.get('group', default=None)
     if not desired_group:
@@ -120,15 +145,19 @@ def students_by_groups(token):
 
 @app.route('/attendance', methods=['GET'])
 @fetch_valid_token
+@cache.cached(timeout=30, key_prefix=make_cache_key)
 def get_attendance(token):
     date = request.args.get('date', default=None)
+    group_filter = request.args.get('group', default=None)
+
     if not date:
         return pretty_json_response({'success': False, 'message': "Missing 'date' parameter"}, 400)
 
     response = parse_and_validate_attendance(access_token=token,
                                              spreadsheet_id=SPREADSHEET_ID,
                                              sheet_name=ARKUSZ_LISTA_OBECNOŚCI,
-                                             date_from_client=date)
+                                             date_from_client=date,
+                                             group_filter=group_filter)
     if not response['success']:
         return pretty_json_response(response, 400)
     

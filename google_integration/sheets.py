@@ -1,96 +1,25 @@
 import google.auth.exceptions
-from google.auth.transport.requests import Request
-from google_auth_oauthlib.flow import Flow
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
-from app_initialization import cache
 
-import json
 import os
-import requests
 from datetime import datetime   
 import pytz
-from dotenv import load_dotenv
 import logging
-import base64
-from email.mime.text import MIMEText
 
+
+from utils.environment import (
+    load_environment
+)
+
+
+load_environment()
 logging.basicConfig(level=logging.INFO)
 
-dir_above = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-ENV_PATH = os.path.abspath(os.path.join(dir_above, '.env'))
+
 CREDENTIALS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'credentials.json')
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/gmail.send"]
-
-load_dotenv(ENV_PATH)
-
-
-flow = Flow.from_client_secrets_file(
-    CREDENTIALS_PATH, 
-    scopes=SCOPES,
-    redirect_uri='https://zienex.pythonanywhere.com/auth-callback'
-    )
-
-
-def get_valid_access_token(cached_token):
-    access_token = cached_token
-    if access_token and is_access_token_valid(access_token):
-        logging.info('Access token is valid.')
-        return access_token
-
-    else:
-        logging.warning('Access token not valid or not cached. Refreshing token...')
-        token = refresh_access_token(refresh_token=os.getenv('REFRESH_TOKEN'))
-        if token:
-            cache.set('access_token', token)
-            logging.info('Access token refreshed and cached.')
-        else:
-            logging.error('Failed to refresh access token.')
-        return token
-
-
-def refresh_access_token(refresh_token, credentials_path=CREDENTIALS_PATH):
-    """
-    Uses refresh token that is connected with Google account
-    and app credentials in order to create an access token
-    """
-    logging.info('Attempting to refresh access token...')
-
-    with open(credentials_path, 'r') as f:
-        credentials_info = json.load(f)['web']
-
-    client_id = credentials_info['client_id']
-    client_secret = credentials_info['client_secret']
-    try:
-        credentials = Credentials(
-            None,  
-            refresh_token=refresh_token,
-            token_uri='https://oauth2.googleapis.com/token',
-            client_id=client_id,
-            client_secret=client_secret
-        )
-
-        request = Request()
-        credentials.refresh(request)
-
-        return credentials.token
-
-    except google.auth.exceptions.RefreshError as e:
-        logging.error(f"Failed to refresh token: {str(e)}")
-        # Consider a mechanism to notify the system or the user that re-authentication is required.
-        return None
-    except Exception as e:
-        logging.error(f'An unexpected error occurred during refreshing an access token: {str(e)}')
-        return None
-
-
-def is_access_token_valid(access_token):
-    response = requests.get('https://www.googleapis.com/oauth2/v3/tokeninfo', params={'access_token': access_token})
-    if response.ok:
-        return True
-    else:
-        return False
 
 
 def get_sheet_service(access_token):
@@ -402,80 +331,67 @@ def validate_attendance_date_for_today(date_from_client):
         return {'success': False, 'message': 'Date has not been provided'}
 
 
-def parse_and_validate_attendance(access_token, spreadsheet_id, sheet_name, date_from_client, NAME_COLUMN="Imię", SURNAME_COLUMN="Nazwisko", GROUP_COLUMN="Grupa"):
+def parse_and_validate_attendance(access_token, spreadsheet_id, sheet_name, date_from_client, group_filter=None, NAME_COLUMN="Imię", SURNAME_COLUMN="Nazwisko", GROUP_COLUMN="Grupa"):
     service = get_sheet_service(access_token)
     sheet_id = find_sheet_id(service, spreadsheet_id, sheet_name)
     if sheet_id is None:
+        logging.error("Sheet name not found.")
         return {'success': False, 'message': 'Sheet name not found'}
 
     values, err_message = fetch_spreadsheet_data(access_token, spreadsheet_id, sheet_name)
     if err_message:
+        logging.error(f"Error fetching data: {err_message}")
         return err_message
     if not values:
+        logging.error("No values found in the spreadsheet.")
         return {'success': False, 'message': 'Spreadsheet has no values. Please make sure it has at least a header row'}
 
     columns = [col.strip() for col in values[0]]
     valid_date = validate_attendance_date(date_from_client=date_from_client, columns_already_in_spreadsheet=columns)
     if not valid_date['success']:
+        logging.error(f"Invalid date: {valid_date['message']}")
         return valid_date
-
-    if date_from_client.strip() not in columns:
-        return {'success': False, 'message': 'Date was not found in columns'}
 
     try:
         date_col_index = columns.index(date_from_client.strip())
-        students_at_given_date = []
         name_index = columns.index(NAME_COLUMN)
         surname_index = columns.index(SURNAME_COLUMN)
         group_index = columns.index(GROUP_COLUMN)
+
+        students_at_given_date = []
         for student in values[1:]:
             if len(student) == len(columns):
-                student_info = {
-                    NAME_COLUMN: student[name_index],
-                    SURNAME_COLUMN: student[surname_index],
-                    GROUP_COLUMN: student[group_index],
-                }
-
-                if student[date_col_index] == 'TRUE':
-                    student[date_col_index] = True
-                elif student[date_col_index] == 'FALSE':
-                    student[date_col_index] = False
-                
-                student_info['attendance'] = student[date_col_index]
-                students_at_given_date.append(student_info)
+                student_info = fetch_student_info(student=student, 
+                                                  group_filter=group_filter, 
+                                                  group_index=group_index, 
+                                                  name_index=name_index, 
+                                                  surname_index=surname_index, 
+                                                  NAME_COLUMN=NAME_COLUMN, 
+                                                  SURNAME_COLUMN=SURNAME_COLUMN, 
+                                                  GROUP_COLUMN=GROUP_COLUMN)
+                if student_info:
+                    student[date_col_index] = student[date_col_index] == 'TRUE'
+                    student_info['attendance'] = student[date_col_index]
+                    students_at_given_date.append(student_info)
 
         return {'success': True, 'data': students_at_given_date}
-    except Exception as e:
-        return {'success': False, 'message': f"Unexpected error ocurred: {str(e)}"}
+    except ValueError as e:
+        logging.error(f"Value error in parsing data: {str(e)}")
+        return {'success': False, 'message': f"Unexpected error occurred: {str(e)}"}
+    except IndexError as e:
+        logging.error(f"Index error in accessing list elements: {str(e)}")
+        return {'success': False, 'message': f"Unexpected error occurred: {str(e)}"}
 
 
-def get_google_auth_url():
-    auth_url, _ = flow.authorization_url(prompt='consent')
-    return auth_url
 
-
-def create_message(sender, to, subject, message_text):
-    if isinstance(to, list):
-        to = ', '.join(to)
-
-    message = MIMEText(message_text)
-    message['to'] = to
-    message['from'] = sender
-    message['subject'] = subject
-    return {'raw': base64.urlsafe_b64encode(message.as_string().encode()).decode()}
-
-
-def send_email(access_token, sender, to, subject, message_text):
-    logging.info(f'Sending email to {to} from {sender} with subject {subject}.')
-    credentials = Credentials(token=access_token)
-    service = build('gmail', 'v1', credentials=credentials)
-    message = create_message(sender, to, subject, message_text)
-    try:
-        message = (service.users().messages().send(userId='me', body=message).execute())
-        return {'success': True, 'message': 'Mail sent successfuly'}
-    except Exception as error:
-        logging.error(f'Email sending failed: {error}')
-        return {'success': False, 'message': 'An error occurred while sending mail'}    
+def fetch_student_info(student, group_filter, name_index, surname_index, group_index, NAME_COLUMN, SURNAME_COLUMN, GROUP_COLUMN):
+    if group_filter and student[group_index] != group_filter:
+        return None
+    return {
+        NAME_COLUMN: student[name_index],
+        SURNAME_COLUMN: student[surname_index],
+        GROUP_COLUMN: student[group_index]
+    }
 
 
 def is_compatible_with_spreadsheet(spread_col_names, json_data):
@@ -497,22 +413,3 @@ def is_compatible_with_spreadsheet(spread_col_names, json_data):
             "missing_keys": list(missing_keys),
             "extra_keys": list(extra_keys)
         }
-
-def update_env_file(key, value, env_path=ENV_PATH):
-    """Update an environment variable in a .env file. If the variable does not exist, add it."""
-    logging.info(f'Saving new information in {env_path}')
-    if not os.path.isfile(env_path):
-        with open(env_path, 'w'): pass
-    lines = []
-    with open(env_path, 'r') as file:
-        lines = file.readlines()
-    key_exists = False
-    for i, line in enumerate(lines):
-        if line.startswith(f'{key}='):
-            lines[i] = f'{key}={value}\n'
-            key_exists = True
-            break
-    if not key_exists:
-        lines.append(f'{key}={value}\n')
-    with open(env_path, 'w') as file:
-        file.writelines(lines)
